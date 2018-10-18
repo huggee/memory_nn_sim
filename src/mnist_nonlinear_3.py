@@ -14,7 +14,7 @@ from PIL import Image
 from six.moves import urllib
 
 def noising(x):
-    return np.random.uniform(x, 1e-11)
+    return np.random.normal(x, 1e-11)
 
 
 args = sys.argv
