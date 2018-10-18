@@ -124,6 +124,8 @@ if sign_const == 1:
 #     ax.get_yaxis().set_visible(False)
 # plt.savefig('mnist_ae_nol_pm.png')
 
+hidden_x_arr = []
+
 #####################
 ### learning loop ###
 #####################
@@ -144,6 +146,11 @@ for iteration in range(max_itr):
 
     hidden_x = current_encode[0] - current_encode[1]
     hidden_y = np.where(hidden_x > 0, 1.0, 0.0)
+
+    if len(hidden_x_arr) < 100:
+        hidden_x_arr.append(hidden_x)
+    else:
+        hidden_x_arr[iteration % 100] = hidden_x
 
     ##############
     ### decode ###
@@ -255,3 +262,5 @@ np.save('vg.npy', vg)
 # vg0 = np.delete(vg0, np.where(vg0 == 0.0))
 # plt.hist(vg0, bins = 100)
 # plt.show()
+
+pdb.set_trace()
