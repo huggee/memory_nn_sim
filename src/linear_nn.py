@@ -1,7 +1,3 @@
-# -*- coding: utf-8 -*-
-
-#### 重み減少学習, vthばらつき
-
 import matplotlib.pyplot as plt
 import datetime
 import gzip
@@ -13,13 +9,10 @@ import sys
 from PIL import Image
 from six.moves import urllib
 
-def noising(x):
-    # return np.random.normal(x / (np.sqrt(70*1e-9*140*1e-9)), 100.0)
-    return np.random.normal(x, 1e-11)
-
 args = sys.argv
 
-print datetime.datetime.now()
+now = datetime.datetime.now()
+print now
 
 ### n_visible:  number of visible neurons 
 ### n_hidden:   number of hidden neurons 
@@ -34,15 +27,11 @@ print(image_size, n_visible, n_hidden)
 
 ### max / min gate voltage
 if sign_const == 1:
-    vg_init = -0.8
-    vg_max = -0.6
-    vg_min = -0.8
+    vg_max = 1.0
+    vg_min = 1e-3
 else:
-    vg_init = -0.8
-    vg_max = -0.6
-    vg_min = -0.8
-
-max_min_const = 0
+    vg_max = 1.0
+    vg_min = 1e-3
 
 ### n_batch: number of data in a batch
 ### max_itr: max number of learning
@@ -95,23 +84,17 @@ with gzip.open(file_path, 'rb') as f:
 ### normalize and resize ###
 ############################
 img = [Image.fromarray(i) for i in images]
-## if crop
-crop_width = 2
-img = [i.crop((crop_width, crop_width, 28-crop_width, 28-crop_width)) for i in img]
-if image_size < 28-crop_width*2:
-    img = [i.resize((image_size, image_size)) for i in img]
-# ## if not crop
-# if image_size < 28:
-#     img = [i.resize((image_size, image_size)) for i in img]
+img = [i.resize((image_size, image_size)) for i in img]
 img = [np.asarray(i) for i in img]
 img = np.array(img)
 img = np.where(img > 63.0, 1.0, 0.0)
-img = np.reshape(img, [items, -1])
+img = np.reshape(img, [items, n_visible])
 
 ##################################
 ### initialize weight adn grad ###
 ##################################
 vg        = np.random.uniform(vg_min, vg_max, [2, n_visible, n_hidden])
+# vg = np.random.uniform(0, 1.0, [2, n_visible, n_hidden])
 _vg       = np.zeros([2, n_visible, n_hidden])
 delta_vg  = np.zeros([n_visible, n_hidden])
 _delta_vg = np.zeros([n_visible, n_hidden])
@@ -123,12 +106,8 @@ ada_grad  = np.zeros([2, n_visible, n_hidden])
 vg_sign  = np.random.choice([True, False], size = [n_visible, n_hidden])
 vg_sign  = np.array([vg_sign, ~vg_sign])
 
-# ####### WRITE OUT MNIST IMAGE #######
-# n = 100
-# w = 10
-# h = 10
-# # plt.figure(figsize = (20, 4))
-# plt.figure()
+# n = 10
+# plt.figure(figsize = (20, 4))
 # for i in range(n):
 #     # ax = plt.subplot(2, n, i + 1)
 #     # plt.imshow(x_set[i].reshape(28, 28))
@@ -136,23 +115,22 @@ vg_sign  = np.array([vg_sign, ~vg_sign])
 #     # ax.get_xaxis().set_visible(False)
 #     # ax.get_yaxis().set_visible(False)
 # 
-#     ax = plt.subplot(h, w, i+1)
-#     # plt.imshow(img[i].reshape(image_size, image_size))
-#     if image_size < 28-crop_width*2:
-#         plt.imshow(img[i].reshape(image_size, image_size))
-#     else:
-#         plt.imshow(img[i].reshape(28-crop_width*2, 28-crop_width*2))
+#     ax = plt.subplot(2, n, i + 1 + n)
+#     plt.imshow(img[i].reshape(28, 28))
 #     plt.gray()
 #     ax.get_xaxis().set_visible(False)
 #     ax.get_yaxis().set_visible(False)
-# plt.savefig('mnist.png')
-# exit()
+# plt.savefig('mnist_ae_nol_pm.png')
 
-hidden_y_prev = np.zeros(n_hidden)
-output_y_prev = np.zeros(n_visible)
+with open('not_match.txt', mode = 'w') as f:
+    f.write(str(now)+'\n')
+
 #####################
 ### learning loop ###
 #####################
+f = open('not_match.txt', mode = 'a')
+not_match_sum_en = 0.0
+not_match_sum_de = 0.0
 for iteration in range(max_itr):
     x_input = img[np.random.randint(0, items)]
 
@@ -160,37 +138,55 @@ for iteration in range(max_itr):
     ### encode ###
     ##############
     current_encode = np.zeros([2, n_hidden])
+    volts_nonground = np.zeros([2, n_hidden])
     for i in range(2):
         if sign_const == 1:
-            a = 1.4 * np.exp(16.0 * vg[i]) * vg_sign[i]
+            # a = 1.4 * np.exp(16.0 * vg[i]) * vg_sign[i]
+            a = 1.0 / vg[i] * vg_sign[i]
         else:
-            a = 1.4 * np.exp(16.0 * vg[i])
-        b = 1.0 - np.exp(-0.005 * x_input)
+            # a = 1.4 * np.exp(16.0 * vg[i])
+            a = 1.0 / vg[i]
+        # b = 1.0 - np.exp(-0.005 * x_input)
+        b = x_input
         current_encode[i] = np.matmul(b, a)
+        a_sum = np.sum(a, axis=0)
+        volts_nonground[i] = current_encode[i] / a_sum
 
+    comp_c = np.where(current_encode[0] > current_encode[1], 1.0, 0.0)
+    comp_v = np.where(volts_nonground[0] > volts_nonground[1], 1.0, 0.0)
+    not_match = np.where(comp_c != comp_v, 1.0, 0.0)
+    not_match_sum_en += np.sum(not_match)
+    not_match_len_en = not_match.shape[0]
     
     hidden_x = current_encode[0] - current_encode[1]
-    hidden_y = np.where(hidden_x > 0.0, 1.0, 0.0)
-    # hidden_y = np.where(np.abs(hidden_x) < 10.0*1e-3, hidden_y_prev, hidden_y)
-    hidden_y_prev = hidden_y
+    hidden_y = np.where(hidden_x > 0, 1.0, 0.0)
 
     ##############
     ### decode ###
     ##############
     current_decode = np.zeros([2, n_visible])
+    volts_nonground_de = np.zeros([2, n_visible])
     for i in range(2):
         if sign_const == 1:
-            a = 1.4 * np.exp(16.0 * np.transpose(vg[i])) * np.transpose(vg_sign[i])
+            # a = 1.4 * np.exp(16.0 * np.transpose(vg[i])) * np.transpose(vg_sign[i])
+            a = 1.0 / np.transpose(vg[i]) * np.transpose(vg_sign[i])
         else:
-            a = 1.4 * np.exp(16.0 * np.transpose(vg[i]))
-        b = 1.0 - np.exp(-0.005 * -hidden_y)
+            # a = 1.4 * np.exp(16.0 * np.transpose(vg[i]))
+            a = 1.0 / np.transpose(vg[i])
+        # b = 1.0 - np.exp(-0.005 * -hidden_y)
+        b = hidden_y
         current_decode[i] = np.matmul(b, a)
+        a_sum = np.sum(a, axis=0)
+        volts_nonground_de[i] = current_decode[i] / a_sum
+
+    comp_c = np.where(current_decode[0] > current_decode[1], 1.0, 0.0)
+    comp_v = np.where(volts_nonground_de[0] > volts_nonground_de[1], 1.0, 0.0)
+    not_match = np.where(comp_c != comp_v, 1.0, 0.0)
+    not_match_sum_de += np.sum(not_match)
+    not_match_len_de = not_match.shape[0]
 
     output_x = current_decode[0] - current_decode[1]
-    output_y = np.where(output_x > 0.0, 1.0, 0.0)
-    # output_y = np.where(np.abs(output_x) < 10.0*1e-3, output_y_prev, output_y)
-    output_y_prev = output_y
-
+    output_y = np.where(output_x > 0, 1.0, 0.0)
     d_output = output_y
 
 
@@ -211,8 +207,9 @@ for iteration in range(max_itr):
     #############
     ### delta ###
     #############
-    a = np.reshape(loss, [n_visible, 1])
+    # a = np.reshape(loss, [n_visible, 1])
     # a = np.reshape(loss * d_output, [n_visible, 1])
+    a = np.reshape(loss, [n_visible, 1])
     b = np.reshape(hidden_y, [1, n_hidden])
     grad = np.matmul(a, b)
     # delta_vg += grad
@@ -245,30 +242,36 @@ for iteration in range(max_itr):
 
         ### sign constraint
         if sign_const == 1:
-            delta_vg_2 = np.array([delta_vg, delta_vg]) * vg_sign
+            delta_vg_2 = np.array([-delta_vg, delta_vg]) * vg_sign
         else:
             delta_vg_2 = np.array([delta_vg, delta_vg])
 
-        delta_vg_2 = np.where(delta_vg_2 > 0.0, 0.0, delta_vg_2)
-
         vg_new = vg + delta_vg_2
 
-        # ### max/min constraint
-        # if max_min_const == 1:
-        #     vg_new   = np.where(vg_new > vg_max, vg_max, vg_new)
-        #     vg_new   = np.where(vg_new < vg_min, vg_min, vg_new)
+        ### max/min constraint
+        if sign_const == 1:
+            vg_new   = np.where(vg_new > vg_max, vg_max, vg_new)
+            vg_new   = np.where(vg_new < vg_min, vg_min, vg_new)
+        else:
+            vg_new   = np.where(vg_new > vg_max, vg_max, vg_new)
+            vg_new   = np.where(vg_new < vg_min, vg_min, vg_new)
 
         ### update/reset
         # _delta_vg = delta_vg_2
         delta_vg  = np.zeros([n_visible, n_hidden])
-        vg = noising(vg_new)
-        epoch += 1
+        vg        = vg_new
+        epoch    += 1
 
     ### display
-    if (iteration+1) % interval_print == 0:
-        avg_err /= interval_print
-        avg_acc /= interval_print
-        avg_eq  /= interval_print
+    if iteration % interval_print == 0:
+        if iteration == 0:
+            acc_length = 1
+        else:
+            acc_length = interval_print
+
+        avg_err /= acc_length
+        avg_acc /= acc_length
+        avg_eq  /= acc_length
         print('%d, %4d, %f, %f, %2.1f/%d' % (epoch - 1,\
                                              iteration,\
                                              avg_err,\
@@ -279,9 +282,17 @@ for iteration in range(max_itr):
         avg_err = 0.0
         avg_acc = 0.0
         avg_eq  = 0.0
+        not_match_sum_en = float(not_match_sum_en) / acc_length
+        not_match_sum_de = float(not_match_sum_de) / acc_length
+        f.write('%5d: \t %.1f/%d \t %.1f/%d \n' % \
+                (iteration, not_match_sum_en, int(not_match_len_en), \
+                not_match_sum_de, int(not_match_len_de)))
+        not_match_sum = 0.0
 
 np.save('vg.npy', vg)
 # vg0 = np.reshape(vg[0], -1)
 # vg0 = np.delete(vg0, np.where(vg0 == 0.0))
 # plt.hist(vg0, bins = 100)
 # plt.show()
+
+f.close()
