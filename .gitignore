@@ -1,0 +1,3 @@
+mnist_data/
+venv2.7/
+*.npy
